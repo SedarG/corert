@@ -60,6 +60,7 @@
   <ItemGroup>
     <Compile Include="Internal\Diagnostics\ExceptionExtensions.cs" />
     <Compile Include="Internal\Diagnostics\StackTraceHelper.cs" />
+    <Compile Include="Internal\Runtime\CompilerHelpers\ReflectionHelpers.cs" />
     <Compile Include="Internal\Runtime\CompilerHelpers\StartupCode\ThreadingHelpers.cs" />
   </ItemGroup>
   <ItemGroup Condition="'$(IsProjectNLibrary)' != 'true'">
@@ -264,13 +265,13 @@
     <Compile Include="System\Globalization\HebrewCalendar.cs" />
     <Compile Include="System\Globalization\HebrewNumber.cs" />
     <Compile Include="System\Globalization\HijriCalendar.cs" />
-    <Compile Include="System\Globalization\HijriCalendar.Windows.cs" />
     <Compile Include="System\Globalization\InternalGlobalizationHelper.cs" />
     <Compile Include="System\Globalization\JapaneseCalendar.cs" />
-    <Compile Include="System\Globalization\JapaneseCalendar.Windows.cs" />
     <Compile Include="System\Globalization\KoreanCalendar.cs" />
     <Compile Include="System\Globalization\RegionInfo.cs" />
     <Compile Include="System\Globalization\FormatProvider.CultureAwareComparer.cs" />
+    <Compile Include="System\Globalization\SortKey.cs" />
+    <Compile Include="System\Globalization\SortVersion.cs" />
     <Compile Include="System\Globalization\StringInfo.cs" />
     <Compile Include="System\Globalization\TaiwanCalendar.cs" />
     <Compile Include="System\Globalization\TextElementEnumerator.cs" />
@@ -308,18 +309,21 @@
     <Compile Include="System\EventHandler.cs" />
     <Compile Include="System\FormatException.cs" />
     <Compile Include="System\GC.cs" />
+    <Compile Include="System\Globalization\CalendarAlgorithmType.cs" />
     <Compile Include="System\Globalization\Calendar.cs" />
     <Compile Include="System\Globalization\CalendarData.cs" />
     <Compile Include="System\Globalization\CharUnicodeInfo.cs" />
     <Compile Include="System\Globalization\CompareInfo.cs" />
     <Compile Include="System\Globalization\CultureData.cs" />
     <Compile Include="System\Globalization\CultureInfo.cs" />
+    <Compile Include="System\Globalization\CultureTypes.cs" />
     <Compile Include="System\Globalization\FormatProvider.DateTimeFormat.cs" />
     <Compile Include="System\Globalization\DateTimeFormatInfo.cs" />
     <Compile Include="System\Globalization\DateTimeFormatInfoScanner.cs" />
     <Compile Include="System\Globalization\FormatProvider.DateTimeParse.cs" />
     <Compile Include="System\Globalization\DateTimeStyles.cs" />
     <Compile Include="System\Globalization\DayLightTime.cs" />
+    <Compile Include="System\Globalization\DigitShapes.cs" />
     <Compile Include="System\Globalization\GregorianCalendar.cs" />
     <Compile Include="System\Globalization\GregorianCalendarTypes.cs" />
     <Compile Include="System\Globalization\EastAsianLunisolarCalendar.cs" />
@@ -547,6 +551,7 @@
     <Compile Include="System\Threading\Mutex.cs" />
     <Compile Include="System\Threading\ObjectHeader.cs" Condition="'$(UseSyncTable)' == 'true'" />
     <Compile Include="System\Threading\ReaderWriterLockSlim.cs" />
+    <Compile Include="System\Threading\RuntimeThread.cs" />
     <Compile Include="System\Threading\Semaphore.cs" />
     <Compile Include="System\Threading\SemaphoreFullException.cs" />
     <Compile Include="System\Threading\SemaphoreSlim.cs" />
@@ -554,14 +559,14 @@
     <Compile Include="System\Threading\SpinLock.cs" />
     <Compile Include="System\Threading\SpinWait.cs" />
     <Compile Include="System\Threading\SynchronizationContext.cs" />
-    <Compile Include="System\Threading\SynchronizationContext.WinRT.cs" Condition="'$(IsProjectNLibrary)' == 'true'" />
-    <Compile Include="System\Threading\SynchronizationContext.Dummy.cs" Condition="'$(IsProjectNLibrary)' != 'true'" />
+    <Compile Include="System\Threading\SynchronizationContext.WinRT.cs" Condition="'$(EnableWinRT)' == 'true'" />
+    <Compile Include="System\Threading\SynchronizationContext.Dummy.cs" Condition="'$(EnableWinRT)' != 'true'" />
     <Compile Include="System\Threading\SynchronizationLockException.cs" />
     <Compile Include="System\Threading\SyncTable.cs" Condition="'$(UseSyncTable)' == 'true'" />
     <Compile Include="System\Threading\Tasks\ConcurrentExclusiveSchedulerPair.cs" />
     <Compile Include="System\Threading\Tasks\DebuggerSupport.cs" />
-    <Compile Include="System\Threading\Tasks\DebuggerSupport.WinRT.cs" Condition="'$(IsProjectNLibrary)' == 'true'" />
-    <Compile Include="System\Threading\Tasks\DebuggerSupport.Dummy.cs" Condition="'$(IsProjectNLibrary)' != 'true'" />
+    <Compile Include="System\Threading\Tasks\DebuggerSupport.WinRT.cs" Condition="'$(EnableWinRT)' == 'true'" />
+    <Compile Include="System\Threading\Tasks\DebuggerSupport.Dummy.cs" Condition="'$(EnableWinRT)' != 'true'" />
     <Compile Include="System\Threading\Tasks\Future.cs" />
     <Compile Include="System\Threading\Tasks\FutureFactory.cs" />
     <Compile Include="System\Threading\Tasks\ProducerConsumerQueues.cs" />
@@ -622,7 +627,57 @@
     <Compile Include="System\WeakReferenceOfT.cs" />
   </ItemGroup>
   <!-- Windows is default build -->
+  <ItemGroup Condition="'$(TargetsWindows)'=='true' and '$(EnableWinRT)'!='true'">  
+    <Compile Include="Microsoft\Win32\SafeHandles\SafeRegistryHandle.cs" />
+    <Compile Include="Microsoft\Win32\SafeHandles\SafeRegistryHandle.Windows.cs" />
+    <Compile Include="Microsoft\Win32\RegistryHive.cs" />
+    <Compile Include="Microsoft\Win32\RegistryKey.cs" />
+    <Compile Include="Microsoft\Win32\RegistryKey.Windows.cs" />
+    <Compile Include="Microsoft\Win32\RegistryOptions.cs" />
+    <Compile Include="Microsoft\Win32\RegistryValueKind.cs" />
+    <Compile Include="Microsoft\Win32\RegistryValueOptions.cs" />
+    <Compile Include="Microsoft\Win32\RegistryView.cs" />
+    <Compile Include="Microsoft\Win32\ThrowHelper.cs" />
+    <Compile Include="System\Security\AccessControl\RegistryRights.cs" />
+    <Compile Include="..\..\Common\src\Interop\Windows\mincore\Interop.FormatMessage.cs">
+      <Link>Interop\Windows\mincore\Interop.FormatMessage.cs</Link>
+    </Compile>
+    <Compile Include="..\..\Common\src\Interop\Windows\mincore\Interop.RegistryOptions.cs">
+      <Link>Interop\Windows\mincore\Interop.RegistryOptions.cs</Link>
+    </Compile>
+    <Compile Include="..\..\Common\src\Interop\Windows\mincore\Interop.RegCloseKey.cs">
+      <Link>Interop\Windows\mincore\Interop.RegCloseKey.cs</Link>
+    </Compile>
+    <Compile Include="..\..\Common\src\Interop\Windows\mincore\Interop.RegCreateKeyEx.cs">
+      <Link>Interop\Windows\mincore\Interop.RegCreateKeyEx.cs</Link>
+    </Compile>
+    <Compile Include="..\..\Common\src\Interop\Windows\mincore\Interop.RegEnumKeyEx.cs">
+      <Link>Interop\Windows\mincore\Interop.RegEnumKeyEx.cs</Link>
+    </Compile>
+    <Compile Include="..\..\Common\src\Interop\Windows\mincore\Interop.RegEnumValue.cs">
+      <Link>Interop\Windows\mincore\Interop.RegEnumValue.cs</Link>
+    </Compile>
+    <Compile Include="..\..\Common\src\Interop\Windows\mincore\Interop.RegFlushKey.cs">
+      <Link>Interop\Windows\mincore\Interop.RegFlushKey.cs</Link>
+    </Compile>
+    <Compile Include="..\..\Common\src\Interop\Windows\mincore\Interop.RegOpenKeyEx.cs">
+      <Link>Interop\Windows\mincore\Interop.RegOpenKeyEx.cs</Link>
+    </Compile>
+    <Compile Include="..\..\Common\src\Interop\Windows\mincore\Interop.RegQueryInfoKey.cs">
+      <Link>Interop\Windows\mincore\Interop.RegQueryInfoKey.cs</Link>
+    </Compile>
+    <Compile Include="..\..\Common\src\Interop\Windows\mincore\Interop.RegQueryValueEx.cs">
+      <Link>Interop\Windows\mincore\Interop.RegQueryValueEx.cs</Link>
+    </Compile>
+    <Compile Include="..\..\Common\src\Interop\Windows\mincore\Interop.SECURITY_ATTRIBUTES.cs">
+      <Link>Interop\Windows\mincore\Interop.SECURITY_ATTRIBUTES.cs</Link>
+    </Compile>
+  </ItemGroup>
   <ItemGroup Condition="'$(TargetsWindows)'=='true'">
+    <Compile Condition="'$(EnableWinRT)' != 'true'" Include="System\Globalization\HijriCalendar.Win32.cs" />
+    <Compile Condition="'$(EnableWinRT)' == 'true'" Include="System\Globalization\HijriCalendar.WinRT.cs" />
+    <Compile Condition="'$(EnableWinRT)' != 'true'" Include="System\Globalization\JapaneseCalendar.Win32.cs" />
+    <Compile Condition="'$(EnableWinRT)' == 'true'" Include="System\Globalization\JapaneseCalendar.WinRT.cs" />
     <Compile Include="System\Globalization\CultureInfo.Windows.cs" />
     <Compile Include="System\Globalization\CompareInfo.Windows.cs" />
     <Compile Include="System\Globalization\CultureData.Windows.cs" />
@@ -655,17 +710,18 @@
     <Compile Condition="'$(IsProjectNLibrary)' != 'true'" Include="..\..\Common\src\Interop\Windows\mincore\Interop.Environment.cs">
       <Link>Interop\Windows\mincore\Interop.Environment.cs</Link>
     </Compile>
-    <Compile Condition="'$(IsProjectNLibrary)' == 'true'" Include="System\Threading\ThreadPool.WinRT.cs" />
-    <Compile Condition="'$(IsProjectNLibrary)' != 'true'" Include="System\Threading\ThreadPool.Win32.cs" />
-    <Compile Condition="'$(IsProjectNLibrary)' != 'true'" Include="..\..\Common\src\Interop\Windows\mincore\Interop.ThreadPool.cs">
+    <Compile Condition="'$(EnableWinRT)' == 'true'" Include="System\Threading\ThreadPool.WinRT.cs" />
+    <Compile Condition="'$(EnableWinRT)' != 'true'" Include="System\Threading\ThreadPool.Win32.cs" />
+    <Compile Condition="'$(EnableWinRT)' != 'true'" Include="..\..\Common\src\Interop\Windows\mincore\Interop.ThreadPool.cs">
       <Link>Interop\Windows\mincore\Interop.ThreadPool.cs</Link>
     </Compile>
-    <Compile Condition="'$(IsProjectNLibrary)' == 'true'" Include="System\Threading\Timer.WinRT.cs" />
-    <Compile Condition="'$(IsProjectNLibrary)' != 'true'" Include="System\Threading\Timer.Win32.cs" />
-    <Compile Condition="'$(IsProjectNLibrary)' != 'true'" Include="..\..\Common\src\Interop\Windows\mincore\Interop.Timer.cs">
+    <Compile Condition="'$(EnableWinRT)' == 'true'" Include="System\Threading\Timer.WinRT.cs" />
+    <Compile Condition="'$(EnableWinRT)' != 'true'" Include="System\Threading\Timer.Win32.cs" />
+    <Compile Include="System\Threading\Timer.Windows.cs" />
+    <Compile Condition="'$(EnableWinRT)' != 'true'" Include="..\..\Common\src\Interop\Windows\mincore\Interop.Timer.cs">
       <Link>Interop\Windows\mincore\Interop.Timer.cs</Link>
     </Compile>
-    <Compile Condition="'$(IsProjectNLibrary)' != 'true'" Include="..\..\Common\src\Interop\Windows\mincore\Interop.DynamicLoad.cs">
+    <Compile Condition="'$(EnableWinRT)' != 'true'" Include="..\..\Common\src\Interop\Windows\mincore\Interop.DynamicLoad.cs">
       <Link>Interop\Windows\mincore\Interop.DynamicLoad.cs</Link>
     </Compile>
   </ItemGroup>
@@ -694,6 +750,8 @@
     </Compile>
   </ItemGroup>
   <ItemGroup Condition="'$(TargetsUnix)'=='true'">
+    <Compile Include="System\Globalization\HijriCalendar.Unix.cs" />
+    <Compile Include="System\Globalization\JapaneseCalendar.Unix.cs" />
     <Compile Include="System\Globalization\CultureInfo.Dummy.cs" />
     <Compile Include="System\Globalization\CompareInfo.Dummy.cs" />
     <Compile Include="System\Globalization\CultureData.Dummy.cs" />
@@ -724,6 +782,9 @@
     </Compile>
     <Compile Include="..\..\Common\src\Interop\Unix\System.Private.CoreLib.Native\Interop.DynamicLoad.cs">
       <Link>Interop\Unix\System.Private.CoreLib.Native\Interop.DynamicLoad.cs</Link>
+    </Compile>
+    <Compile Include="..\..\Common\src\Interop\Unix\System.Private.CoreLib.Native\Interop.SysConf.cs">
+      <Link>Interop\Unix\System.Private.CoreLib.Native\Interop.SysConf.cs</Link>
     </Compile>
   </ItemGroup>
   <ItemGroup>

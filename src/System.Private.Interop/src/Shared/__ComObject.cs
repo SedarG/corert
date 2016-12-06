@@ -63,9 +63,11 @@ namespace System
         }
     }
 
-    internal abstract class __ComGenericInterfaceDispatcher
+    [CLSCompliant(false)]
+    public abstract class __ComGenericInterfaceDispatcher
     {
-        internal __ComObject m_comObject;
+        public __ComObject m_comObject;
+        public __ComGenericInterfaceDispatcher() { }
     }
 
     /// <summary>
@@ -74,7 +76,7 @@ namespace System
     /// </summary>
     [EditorBrowsable(EditorBrowsableState.Never)]
     [CLSCompliant(false)]
-#if !RHTESTCL && !CORECLR && !CORERT
+#if !RHTESTCL && !CORECLR && !CORERT && ENABLE_WINRT
     public unsafe class __ComObject : CastableObject, ICastable
 #else
     public unsafe class __ComObject : ICastable
@@ -317,7 +319,7 @@ namespace System
 
         static __ComObject()
         {
-#if !RHTESTCL && !CORECLR && !CORERT
+#if !RHTESTCL && !CORECLR && !CORERT && ENABLE_WINRT
             // Projected types
             s_DynamicRCWAdapters[typeof(IEnumerable<>).TypeHandle]                                                  = typeof(IEnumerable_RCWAdapter<>).TypeHandle;
             s_DynamicRCWAdapters[typeof(IList<>).TypeHandle]                                                        = typeof(IList_RCWAdapter<>).TypeHandle;
@@ -328,13 +330,14 @@ namespace System
             
             // Non-projected types
             s_DynamicRCWAdapters[typeof(global::Windows.Foundation.Collections.IIterator<>).TypeHandle]             = typeof(IIterator_RCWAdapter<>).TypeHandle;
-            //s_DynamicRCWAdapters[typeof(global::Windows.Foundation.Collections.IObservableVector<>).TypeHandle]     = typeof(IObservableVector_RCWAdapter<>).TypeHandle;
             s_DynamicRCWAdapters[typeof(global::Windows.Foundation.Collections.IMapChangedEventArgs<>).TypeHandle]  = typeof(IMapChangedEventArgs_RCWAdapter<>).TypeHandle;
-            //s_DynamicRCWAdapters[typeof(global::Windows.Foundation.Collections.IObservableMap<,>).TypeHandle]       = typeof(IObservableMap_RCWAdapter<,>).TypeHandle;
             s_DynamicRCWAdapters[typeof(global::Windows.Foundation.IAsyncOperationWithProgress<,>).TypeHandle]      = typeof(IAsyncOperationWithProgress_RCWAdapter<,>).TypeHandle;
             s_DynamicRCWAdapters[typeof(global::Windows.Foundation.IAsyncOperation<>).TypeHandle]                   = typeof(IAsyncOperation_RCWAdapter<>).TypeHandle;
             s_DynamicRCWAdapters[typeof(global::Windows.Foundation.IAsyncActionWithProgress<>).TypeHandle]          = typeof(IAsyncActionWithProgress_RCWAdapter<>).TypeHandle;
-            //s_DynamicRCWAdapters[typeof(global::Windows.Foundation.IReferenceArray<>).TypeHandle]                   = typeof(IReferenceArray_RCWAdapter<>).TypeHandle;
+
+            // Root constructors of RCW adapters that are base classes of other RCW adapters
+            new IList_RCWAdapter<object>();                 // Base class of the IObservableVector RCW adapter
+            new IDictionary_RCWAdapter<object, object>();   // Base class of the IObservableMap RCW adapter
 #endif
         }
 
@@ -840,7 +843,7 @@ namespace System
                         if (inBaseContext)
                             McgMarshal.ComRelease(ptr);
                         else
-                            baseContext.EnqueueDelayedRelease(ptr);
+                            baseContext.EnqueueDelayedComRelease(ptr);
                     }
                 }
 
@@ -865,7 +868,7 @@ namespace System
                             if (isCacheContextCurrent)
                                 McgMarshal.ComRelease(cacheEntry.ptr);
                             else
-                                cache.context.EnqueueDelayedRelease(cacheEntry.ptr);
+                                cache.context.EnqueueDelayedComRelease(cacheEntry.ptr);
                         }
                     }
                 }
@@ -893,7 +896,7 @@ namespace System
                 if (inBaseContext)
                     McgMarshal.ComRelease(m_cachedInterfaces[0].GetPtr());
                 else
-                    baseContext.EnqueueDelayedRelease(m_cachedInterfaces[0].GetPtr());
+                    baseContext.EnqueueDelayedComRelease(m_cachedInterfaces[0].GetPtr());
             }
 
             if (IsAggregated)
@@ -1329,7 +1332,7 @@ namespace System
                     RuntimeTypeHandle castableInterface;
                     if (m_cachedInterfaces[i].IsCastableEntry(interfaceType, out pComPtr, out castableInterface))
                     {
-                        if (RuntimeAugments.IsGenericType(castableInterface))
+                        if (castableInterface.IsGenericType())
                             return castableInterface;
                     }
                 }
@@ -1350,7 +1353,7 @@ namespace System
                     {
                         foreach (var item in cache.items)
                         {
-                            if (!RuntimeAugments.IsGenericType(item.typeHandle))
+                            if (!item.typeHandle.IsGenericType())
                                 continue;
 
                             if (!InteropExtensions.AreTypesAssignable(item.typeHandle, interfaceType))
@@ -1544,7 +1547,7 @@ namespace System
         #endregion
 
         #region CastableObject implementation for weakly typed RCWs
-#if !RHTESTCL && !CORECLR && !CORERT
+#if !RHTESTCL && !CORECLR && !CORERT && ENABLE_WINRT
         object CastToICollectionHelper(RuntimeTypeHandle genericTypeDef, RuntimeTypeHandle[] genericArguments, bool testForIDictionary)
         {
             Debug.Assert(genericTypeDef.Equals(typeof(ICollection<>).TypeHandle) || genericTypeDef.Equals(typeof(IReadOnlyCollection<>).TypeHandle));
@@ -1554,7 +1557,7 @@ namespace System
             bool isICollectionOfKvp = false;
             RuntimeTypeHandle[] ikvpArgs = null;
 
-            if (RuntimeAugments.IsGenericType(genericArguments[0]))
+            if (genericArguments[0].IsGenericType())
             {
                 RuntimeTypeHandle kvpTypeDef = RuntimeAugments.GetGenericInstantiation(genericArguments[0], out ikvpArgs);
                 isICollectionOfKvp = kvpTypeDef.Equals(typeof(KeyValuePair<,>).TypeHandle);
@@ -1679,13 +1682,13 @@ namespace System
 
             // CastableObject support used for generics *only* for now
 
-            if (!RuntimeAugments.IsGenericType(interfaceType))
+            if (!interfaceType.IsGenericType())
             {
                 RuntimeTypeHandle genericInterfaceType = FindCastableGenericInterfaceInCache(interfaceType, out pComPtr);
                 if (genericInterfaceType.IsInvalid())
                     return null;
             
-                Debug.Assert(RuntimeAugments.IsGenericType(genericInterfaceType));
+                Debug.Assert(genericInterfaceType.IsGenericType());
 
                 InsertIntoCache(interfaceType, ContextCookie.Current, ref pComPtr, true);
 
@@ -1696,7 +1699,7 @@ namespace System
             {
                 RuntimeTypeHandle[] genericArguments;
                 RuntimeTypeHandle genericTypeDef = RuntimeAugments.GetGenericInstantiation(interfaceType, out genericArguments);
-            
+
                 //
                 // ICollection<T> is a very special interface, which could map to either IDictionary<,> or IList<>
                 //
@@ -1719,7 +1722,7 @@ namespace System
                     // Cannot cast...
                     return null;
                 }
-            
+
                 //
                 // Check if we can cast the COM object to the requested interface type
                 //
@@ -1749,6 +1752,19 @@ namespace System
                 RuntimeTypeHandle rcwAdapterType;
                 if (s_DynamicRCWAdapters.TryGetValue(genericTypeDef, out rcwAdapterType))
                 {
+                    return McgComHelpers.CreateGenericComDispatcher(rcwAdapterType, genericArguments, this);
+                }
+
+                //
+                // There are some special-case adapters generated by MCG today (IObservableMap, and IObservableVector).
+                //
+                rcwAdapterType = genericTypeDef.GetDynamicAdapterClassType();
+                if (!rcwAdapterType.IsInvalid())
+                {
+                    Debug.Assert(
+                        genericTypeDef.Equals(typeof(global::Windows.Foundation.Collections.IObservableVector<>).TypeHandle) ||
+                        genericTypeDef.Equals(typeof(global::Windows.Foundation.Collections.IObservableMap<,>).TypeHandle));
+
                     return McgComHelpers.CreateGenericComDispatcher(rcwAdapterType, genericArguments, this);
                 }
             }
@@ -1819,8 +1835,8 @@ namespace System
             //
             bool hasValidDispatcher = true;
 
-#if !RHTESTCL && !CORECLR && !CORERT
-            hasValidDispatcher = McgModuleManager.UseDynamicInterop && RuntimeAugments.IsGenericType(interfaceType) ? 
+#if !RHTESTCL && !CORECLR && !CORERT && ENABLE_WINRT
+            hasValidDispatcher = McgModuleManager.UseDynamicInterop && interfaceType.IsGenericType() ? 
                 !interfaceType.GetDispatchClassType().IsInvalid() : 
                 true;
 #endif
@@ -2859,12 +2875,18 @@ namespace System.Runtime.InteropServices
             if (inCurrentContext)
                 McgMarshal.ComRelease(m_pComPtr);
             else
-                m_context.EnqueueDelayedRelease(m_pComPtr);
+                m_context.EnqueueDelayedComRelease(m_pComPtr);
 
             m_pComPtr = default(IntPtr);
 
+            // Use ContextEntry.EnqueueDelayedStreamRelease to make sure the cached streeam is released in the correct context(apartment)
+            // According to MSDN: CoReleaseMarshalData function
+            // You must call the CoReleaseMarshalData function in the same apartment that called CoMarshalInterface to marshal the object into the stream
             if (m_pCachedStream != default(IntPtr))
-                McgComHelpers.SafeReleaseStream(m_pCachedStream);
+            {
+                m_context.EnqueueDelayedStreamRelease(m_pCachedStream);
+                m_pCachedStream = default(IntPtr);
+            }
         }
     }
 
@@ -3132,23 +3154,46 @@ namespace System.Runtime.InteropServices
             return ContextEntryManager.GetContextEntry(currentCookie);
         }
 
+        private Lock m_delayedReleaseListLock = new Lock();
+        
         //
         // Per-context list of interfaces that need to be released, next time we get a chance to do
         // so in this context.
         //
-        private Lock m_delayedReleaseListLock = new Lock();
         private System.Collections.Generic.Internal.List<IntPtr> m_delayedReleaseList;
+        
+        //
+        // Per-context list of Stream that need to be released, next time we get a chance to do
+        // so in this context.
+        //
+        private System.Collections.Generic.Internal.List<IntPtr> m_delayedReleaseStreamList;
 
-        internal void EnqueueDelayedRelease(IntPtr pComPtr)
+        internal void EnqueueDelayedComRelease(IntPtr pComPtr)
         {
             try
             {
                 m_delayedReleaseListLock.Acquire();
 
                 if (m_delayedReleaseList == null)
-                    m_delayedReleaseList = new System.Collections.Generic.Internal.List<IntPtr>(1);
-
+                    m_delayedReleaseList = new System.Collections.Generic.Internal.List<IntPtr>(25);
                 m_delayedReleaseList.Add(pComPtr);
+            }
+            finally
+            {
+                m_delayedReleaseListLock.Release();
+            }
+        }
+
+        internal void EnqueueDelayedStreamRelease(IntPtr pStream)
+        {
+            try
+            {
+                m_delayedReleaseListLock.Acquire();
+
+                if (m_delayedReleaseStreamList == null)
+                    m_delayedReleaseStreamList = new System.Collections.Generic.Internal.List<IntPtr>(25);
+
+                m_delayedReleaseStreamList.Add(pStream);
             }
             finally
             {
@@ -3168,6 +3213,7 @@ namespace System.Runtime.InteropServices
             Debug.Assert(this.IsCurrent);
 
             System.Collections.Generic.Internal.List<IntPtr> list = null;
+            System.Collections.Generic.Internal.List<IntPtr> streamlist = null;
 
             try
             {
@@ -3177,6 +3223,12 @@ namespace System.Runtime.InteropServices
                 {
                     list = m_delayedReleaseList;
                     m_delayedReleaseList = null;
+                }
+
+                if (m_delayedReleaseStreamList != null)
+                {
+                    streamlist = m_delayedReleaseStreamList;
+                    m_delayedReleaseStreamList = null;
                 }
             }
             finally
@@ -3188,7 +3240,15 @@ namespace System.Runtime.InteropServices
             {
                 for (int i = 0; i < list.Count; i++)
                 {
-                    McgMarshal.ComRelease(list[i]);
+                    McgMarshal.ComSafeRelease(list[i]);
+                }
+            }
+
+            if (streamlist != null)
+            {
+                for (int i = 0; i < streamlist.Count; i++)
+                {
+                    McgComHelpers.SafeReleaseStream(streamlist[i]);
                 }
             }
         }
@@ -3829,10 +3889,8 @@ namespace System.Runtime.InteropServices
     /// </summary>
     internal class FactoryCache
     {
-        const int DefaultSize = 11; // Small prime number to avoid resizing dictionary resizing in start up code
-
         private Lock m_factoryLock = new Lock();
-        private System.Collections.Generic.Internal.Dictionary<string, FactoryCacheItem> m_cachedFactories = new System.Collections.Generic.Internal.Dictionary<string, FactoryCacheItem>(DefaultSize);
+        private System.Collections.Concurrent.ConcurrentDictionary<string, FactoryCacheItem> m_cachedFactories = new System.Collections.Concurrent.ConcurrentDictionary<string, FactoryCacheItem>();
 
         private static volatile FactoryCache s_factoryCache;
 
@@ -3887,29 +3945,21 @@ namespace System.Runtime.InteropServices
 
             FactoryCacheItem cacheItem;
 
-            int hashCode = className.GetHashCode();
 
             if (!skipCache)
             {
-                try
-                {
-                    m_factoryLock.Acquire();
 
-                    if (m_cachedFactories.TryGetValue(className, hashCode, out cacheItem))
+                 if (m_cachedFactories.TryGetValue(className, out cacheItem))
+                 {
+                    if (cacheItem.contextEntry == currentContext)
                     {
-                        if (cacheItem.contextEntry == currentContext)
-                        {
-                            //
-                            // We've found a matching entry
-                            //
-                            return cacheItem.factoryObject;
-                        }
+                        //
+                        // We've found a matching entry
+                        //
+                        return cacheItem.factoryObject;
                     }
-                }
-                finally
-                {
-                    m_factoryLock.Release();
-                }
+                 }
+                
             }
 
             //
@@ -3926,16 +3976,7 @@ namespace System.Runtime.InteropServices
                 //
                 // Insert into or update cache
                 //
-                try
-                {
-                    m_factoryLock.Acquire();
-
-                    m_cachedFactories[className] = cacheItem;
-                }
-                finally
-                {
-                    m_factoryLock.Release();
-                }
+                m_cachedFactories.AddOrUpdate(className, cacheItem,  (key, oldValue) => cacheItem);
             }
 
             return cacheItem.factoryObject;

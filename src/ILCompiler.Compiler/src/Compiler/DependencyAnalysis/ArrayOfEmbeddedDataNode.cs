@@ -26,26 +26,13 @@ namespace ILCompiler.DependencyAnalysis
 
         public ArrayOfEmbeddedDataNode(string startSymbolMangledName, string endSymbolMangledName, IComparer<TEmbedded> nodeSorter)
         {
-            _startSymbol = new ObjectAndOffsetSymbolNode(this, 0, startSymbolMangledName);
-            _endSymbol = new ObjectAndOffsetSymbolNode(this, 0, endSymbolMangledName);
+            _startSymbol = new ObjectAndOffsetSymbolNode(this, 0, startSymbolMangledName, true);
+            _endSymbol = new ObjectAndOffsetSymbolNode(this, 0, endSymbolMangledName, true);
             _sorter = nodeSorter;
         }
 
-        internal ObjectAndOffsetSymbolNode StartSymbol
-        {
-            get
-            {
-                return _startSymbol;
-            }
-        }
-
-        internal ObjectAndOffsetSymbolNode EndSymbol
-        {
-            get
-            {
-                return _endSymbol;
-            }
-        }
+        internal ObjectAndOffsetSymbolNode StartSymbol => _startSymbol;
+        internal ObjectAndOffsetSymbolNode EndSymbol => _endSymbol;
 
         public void AddEmbeddedObject(TEmbedded symbol)
         {
@@ -61,34 +48,14 @@ namespace ILCompiler.DependencyAnalysis
             return _nestedNodesList.IndexOf(symbol);
         }
 
-        protected override string GetName()
-        {
-            return "Region " + ((ISymbolNode)_startSymbol).MangledName;
-        }
+        protected override string GetName() => $"Region {_startSymbol.GetMangledName()}";
 
-        public override ObjectNodeSection Section
-        {
-            get
-            {
-                return ObjectNodeSection.DataSection;
-            }
-        }
+        public override ObjectNodeSection Section => ObjectNodeSection.DataSection;
+        public override bool IsShareable => false;
 
-        public override bool StaticDependenciesAreComputed
-        {
-            get
-            {
-                return true;
-            }
-        }
+        public override bool StaticDependenciesAreComputed => true;
 
-        protected IEnumerable<TEmbedded> NodesList
-        {
-            get
-            {
-                return _nestedNodesList;
-            }
-        }
+        protected IEnumerable<TEmbedded> NodesList =>  _nestedNodesList;
 
         protected virtual void GetElementDataForNodes(ref ObjectDataBuilder builder, NodeFactory factory, bool relocsOnly)
         {

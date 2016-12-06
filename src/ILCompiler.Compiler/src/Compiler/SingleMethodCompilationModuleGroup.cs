@@ -14,8 +14,7 @@ namespace ILCompiler
     {
         private MethodDesc _method;
 
-        public SingleMethodCompilationModuleGroup(CompilerTypeSystemContext typeSystemContext, MethodDesc method)
-            : base(typeSystemContext)
+        public SingleMethodCompilationModuleGroup(MethodDesc method)
         {
             _method = method;
         }
@@ -41,21 +40,6 @@ namespace ILCompiler
         public override bool ShouldProduceFullType(TypeDesc type)
         {
             return false;
-        }
-
-        public override bool ShouldShareAcrossModules(MethodDesc method)
-        {
-            return true;
-        }
-
-        public override bool ShouldShareAcrossModules(TypeDesc type)
-        {
-            return true;
-        }
-
-        public override void AddCompilationRoots(IRootingServiceProvider rootProvider)
-        {
-            rootProvider.AddCompilationRoot(_method, "Single method mode");
         }
 
         public override bool ShouldReferenceThroughImportTable(TypeDesc type)

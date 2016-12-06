@@ -14,8 +14,39 @@ namespace Internal.Runtime.Augments
         public static int CurrentManagedThreadId => System.Threading.ManagedThreadId.Current;
         public static void FailFast(string message, Exception error) => RuntimeExceptionHelpers.FailFast(message, error);
 
-        public static void Exit(int exitCode) => Environment.Exit(exitCode);
-        public static int ExitCode { get { return 0; } set { throw new PlatformNotSupportedException(); } }
+        public static void Exit(int exitCode)
+        {
+#if CORERT
+            s_latchedExitCode = exitCode;
+
+            ShutdownCore();
+
+            RuntimeImports.RhpShutdown();
+
+            Interop.ExitProcess(s_latchedExitCode);
+#else
+            // This needs to be implemented for ProjectN.
+            throw new PlatformNotSupportedException();
+#endif
+        }
+
+        internal static void ShutdownCore()
+        {
+            // Here we'll handle AppDomain.ProcessExit, shut down threading etc.
+        }
+
+        private static int s_latchedExitCode;
+        public static int ExitCode
+        {
+            get
+            {
+                return s_latchedExitCode;
+            }
+            set
+            {
+                s_latchedExitCode = value;
+            }
+        }
 
         private static string[] s_commandLineArgs;
 

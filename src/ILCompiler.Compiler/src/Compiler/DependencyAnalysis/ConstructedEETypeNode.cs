@@ -6,23 +6,20 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 
-using ILCompiler.DependencyAnalysisFramework;
 using Internal.Runtime;
+using Internal.Text;
 using Internal.TypeSystem;
 
 namespace ILCompiler.DependencyAnalysis
 {
-    internal class ConstructedEETypeNode : EETypeNode, ISymbolNode
+    internal class ConstructedEETypeNode : EETypeNode
     {
-        public ConstructedEETypeNode(TypeDesc type) : base(type)
+        public ConstructedEETypeNode(NodeFactory factory, TypeDesc type) : base(factory, type)
         {
-            Debug.Assert(!_type.IsGenericDefinition);
+            CheckCanGenerateConstructedEEType(factory, type);
         }
-        
-        protected override string GetName()
-        {
-            return ((ISymbolNode)this).MangledName + " constructed";
-        }
+
+        protected override string GetName() => this.GetMangledName() + " constructed";
 
         public override bool ShouldSkipEmittingObjectNode(NodeFactory factory)
         {
@@ -122,6 +119,9 @@ namespace ILCompiler.DependencyAnalysis
 
             foreach (MethodDesc decl in defType.EnumAllVirtualSlots())
             {
+                if (decl.HasInstantiation)
+                    continue;
+
                 MethodDesc impl = defType.FindVirtualFunctionTargetMethodOnObjectType(decl);
                 if (impl.OwningType == defType && !impl.IsAbstract)
                 {
@@ -189,7 +189,6 @@ namespace ILCompiler.DependencyAnalysis
             for (int i = 0; i < virtualSlots.Count; i++)
             {
                 MethodDesc declMethod = virtualSlots[i];
-                MethodDesc implMethod = implType.GetClosestDefType().FindVirtualFunctionTargetMethodOnObjectType(declMethod);
 
                 if (declMethod.HasInstantiation)
                 {
@@ -197,6 +196,8 @@ namespace ILCompiler.DependencyAnalysis
                     throw new NotImplementedException("VTable for " + _type + " has generic virtual methods.");
                 }
 
+                MethodDesc implMethod = implType.GetClosestDefType().FindVirtualFunctionTargetMethodOnObjectType(declMethod);
+                
                 if (!implMethod.IsAbstract)
                 {
                     MethodDesc canonImplMethod = implMethod.GetCanonMethodTarget(CanonicalFormKind.Specific);
@@ -233,6 +234,36 @@ namespace ILCompiler.DependencyAnalysis
 
             objData.EmitShort(checked((short)virtualSlotCount));
             objData.EmitShort(checked((short)_type.RuntimeInterfaces.Length));
+        }
+
+        public static bool CreationAllowed(TypeDesc type)
+        {
+            switch (type.Category)
+            {
+                case TypeFlags.Pointer:
+                case TypeFlags.FunctionPointer:
+                case TypeFlags.ByRef:
+                    // Pointers and byrefs are not boxable
+                    return false;
+                case TypeFlags.Array:
+                case TypeFlags.SzArray:
+                    // TODO: any validation for arrays?
+                    break;
+
+                default:
+                    // Generic definition EETypes can't be allocated
+                    if (type.IsGenericDefinition)
+                        return false;
+                    break;
+            }
+
+            return true;
+        }
+
+        public static void CheckCanGenerateConstructedEEType(NodeFactory factory, TypeDesc type)
+        {
+            if (!CreationAllowed(type))
+                throw new TypeSystemException.TypeLoadException(ExceptionStringID.ClassLoadGeneral, type);
         }
     }
 }

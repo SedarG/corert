@@ -106,7 +106,7 @@ namespace System.Runtime.InteropServices
 
             IntPtr vt = typeHandle.GetCcwVtable();
 
-#if !RHTESTCL && !CORECLR && !CORERT
+#if !CORECLR && ENABLE_WINRT
             if (vt == default(IntPtr) && McgModuleManager.UseDynamicInterop)
             {
                 // TODO Design an interface, such as IMcgCCWData and each McgModule implements this interface
@@ -1492,7 +1492,13 @@ namespace System.Runtime.InteropServices
             //
             foreach(RuntimeTypeHandle implementedInterface in ccwType.GetImplementedInterfaces())
             {
-                Debug.Assert(!implementedInterface.IsInvalid());
+                // DR may reduce a type away
+                // The root cause is that there are mismatch between DR's necessary Types and Mcg analysis Result's necessary Types
+                if (implementedInterface.IsInvalid())
+                {
+                    continue;
+                }
+
                 bool match = false;
                 if (interfaceType.IsNull())
                 {

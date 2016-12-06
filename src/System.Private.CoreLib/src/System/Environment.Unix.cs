@@ -51,6 +51,8 @@ namespace System
             return blob.ToString();
         }
 
+        public static int ProcessorCount => (int)Interop.Sys.SysConf(Interop.Sys.SysConfName._SC_NPROCESSORS_ONLN);
+
         public unsafe static String GetEnvironmentVariable(String variable)
         {
             if (variable == null)
@@ -67,12 +69,6 @@ namespace System
                 return null;
 
             return Encoding.UTF8.GetString((byte*)result, size);
-        }
-
-        public static void Exit(int exitCode)
-        {
-            // CORERT-TODO: Shut down the runtime
-            Interop.Sys.ExitProcess(exitCode);
         }
     }
 }

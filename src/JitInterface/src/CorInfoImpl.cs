@@ -9,6 +9,7 @@ using System.IO;
 using System.Text;
 using System.Runtime.InteropServices;
 using System.Runtime.CompilerServices;
+using System.Runtime.ExceptionServices;
 
 using Internal.TypeSystem;
 
@@ -29,7 +30,7 @@ namespace Internal.JitInterface
         private IntPtr _unmanagedCallbacks; // array of pointers to JIT-EE interface callbacks
         private Object _keepAlive; // Keeps delegates for the callbacks alive
 
-        private Exception _lastException;
+        private ExceptionDispatchInfo _lastException;
 
         [DllImport("clrjitilc")]
         private extern static IntPtr jitStartup(IntPtr host);
@@ -60,7 +61,7 @@ namespace Internal.JitInterface
 
         private IntPtr AllocException(Exception ex)
         {
-            _lastException = ex;
+            _lastException = ExceptionDispatchInfo.Capture(ex);
 
             string exString = ex.ToString();
             IntPtr nativeException = AllocException(exString, exString.Length);
@@ -118,11 +119,15 @@ namespace Internal.JitInterface
 
         private CORINFO_MODULE_STRUCT_* _methodScope; // Needed to resolve CORINFO_EH_CLAUSE tokens
 
+        private bool _isFallbackBodyCompilation; // True if we're compiling a fallback method body after compiling the real body failed
+
         public void CompileMethod(MethodCodeNode methodCodeNodeNeedingCode, MethodIL methodIL = null)
         {
             try
             {
                 _methodCodeNode = methodCodeNodeNeedingCode;
+
+                _isFallbackBodyCompilation = methodIL != null;
 
                 CORINFO_METHOD_INFO methodInfo;
                 methodIL = Get_CORINFO_METHOD_INFO(MethodBeingCompiled, methodIL, out methodInfo);
@@ -174,7 +179,7 @@ namespace Internal.JitInterface
                 uint codeSize;
                 var result = JitCompileMethod(out exception, 
                         _jit, (IntPtr)Unsafe.AsPointer(ref _this), _unmanagedCallbacks,
-                        ref methodInfo, (uint)CorJitFlag.CORJIT_FLG_CALL_GETJITFLAGS, out nativeEntry, out codeSize);
+                        ref methodInfo, (uint)CorJitFlag.CORJIT_FLAG_CALL_GETJITFLAGS, out nativeEntry, out codeSize);
                 if (exception != IntPtr.Zero)
                 {
                     if (_lastException != null)
@@ -182,7 +187,7 @@ namespace Internal.JitInterface
                         // If we captured a managed exception, rethrow that.
                         // TODO: might not actually be the real reason. It could be e.g. a JIT failure/bad IL that followed
                         // an inlining attempt with a type system problem in it...
-                        throw _lastException;
+                        _lastException.Throw();
                     }
 
                     // This is a failure we don't know much about.
@@ -219,13 +224,45 @@ namespace Internal.JitInterface
             var builder = new ObjectDataBuilder();
             builder.Alignment = 1;
 
-            // TODO: Filter out duplicate clauses
+            int totalClauses = _ehClauses.Length;
 
-            builder.EmitCompressedUInt((uint)_ehClauses.Length);
+            // Count the number of special markers that will be needed
+            for (int i = 1; i < _ehClauses.Length; i++)
+            {
+                ref CORINFO_EH_CLAUSE clause = ref _ehClauses[i];
+                ref CORINFO_EH_CLAUSE previousClause = ref _ehClauses[i-1];
+
+                if ((previousClause.TryOffset == clause.TryOffset) && 
+                    (previousClause.TryLength == clause.TryLength) && 
+                    ((clause.Flags & CORINFO_EH_CLAUSE_FLAGS.CORINFO_EH_CLAUSE_SAMETRY) == 0))
+                {
+                    totalClauses++;
+                }
+            }
+
+            builder.EmitCompressedUInt((uint)totalClauses);
 
             for (int i = 0; i < _ehClauses.Length; i++)
             {
-                var clause = _ehClauses[i];
+                ref CORINFO_EH_CLAUSE clause = ref _ehClauses[i];
+
+                if (i > 0)
+                {
+                    ref CORINFO_EH_CLAUSE previousClause = ref _ehClauses[i-1];
+
+                    // If the previous clause has same try offset and length as the current clause,
+                    // but belongs to a different try block (CORINFO_EH_CLAUSE_SAMETRY is not set),
+                    // emit a special marker to allow runtime distinguish this case.
+                    if ((previousClause.TryOffset == clause.TryOffset) &&
+                        (previousClause.TryLength == clause.TryLength) && 
+                        ((clause.Flags & CORINFO_EH_CLAUSE_FLAGS.CORINFO_EH_CLAUSE_SAMETRY) == 0))
+                    {
+                        builder.EmitCompressedUInt(0);
+                        builder.EmitCompressedUInt((uint)RhEHClauseKind.RH_EH_CLAUSE_FAULT);
+                        builder.EmitCompressedUInt(0);
+                    }
+                }
+
                 RhEHClauseKind clauseKind;
 
                 if (((clause.Flags & CORINFO_EH_CLAUSE_FLAGS.CORINFO_EH_CLAUSE_FAULT) != 0) ||
@@ -387,17 +424,8 @@ namespace Internal.JitInterface
             return handle;
         }
 
-        // We don't have System.TypedReference but RyuJIT can ask for a classhandle for it anyway.
-        // This is the classhandle we give out. RyuJIT will only use it for comparisons and those
-        // will always be false as expected. It's not valid to pass it back to us.
-        // https://github.com/dotnet/corert/issues/2092
-        private const int FakeTypedReferenceTypeHandle = 0xBEF;
-
         private Object HandleToObject(IntPtr handle)
         {
-            if (handle == (IntPtr)FakeTypedReferenceTypeHandle)
-                throw new InvalidOperationException();
-
             int index = ((int)handle - handleBase) / handleMultipler;
             return _handleToObject[index];
         }
@@ -1272,6 +1300,10 @@ namespace Internal.JitInterface
                         if (type.IsCanonicalSubtype(CanonicalFormKind.Any))
                             return false;
 
+                        // ECMA-335 III.4.3:  If typeTok is a nullable type, Nullable<T>, it is interpreted as "boxed" T
+                        if (type.IsNullable)
+                            type = type.Instantiation[0];
+
                         pLookup.addr = (void*)ObjectToHandle(_compilation.NodeFactory.ReadyToRunHelper(ReadyToRunHelperId.IsInstanceOf, type));
                     }
                     break;
@@ -1280,6 +1312,10 @@ namespace Internal.JitInterface
                         var type = HandleToObject(pResolvedToken.hClass);
                         if (type.IsCanonicalSubtype(CanonicalFormKind.Any))
                             return false;
+
+                        // ECMA-335 III.4.3:  If typeTok is a nullable type, Nullable<T>, it is interpreted as "boxed" T
+                        if (type.IsNullable)
+                            type = type.Instantiation[0];
 
                         pLookup.addr = (void*)ObjectToHandle(_compilation.NodeFactory.ReadyToRunHelper(ReadyToRunHelperId.CastClass, type));
                     }
@@ -1347,7 +1383,7 @@ namespace Internal.JitInterface
             MethodDesc md = HandleToObject(method);
             TypeDesc type = fd != null ? fd.OwningType : typeFromContext(context);
 
-            if (!_compilation.HasLazyStaticConstructor(type))
+            if (!_compilation.HasLazyStaticConstructor(type) || _isFallbackBodyCompilation)
             {
                 return CorInfoInitClassResult.CORINFO_INITCLASS_NOT_REQUIRED;
             }
@@ -1390,6 +1426,13 @@ namespace Internal.JitInterface
                 }
             }
 
+            if (type.IsCanonicalSubtype(CanonicalFormKind.Any))
+            {
+                // Shared generic code has to use helper. Moreover, tell JIT not to inline since
+                // inlining of generic dictionary lookups is not supported.
+                return CorInfoInitClassResult.CORINFO_INITCLASS_USE_HELPER | CorInfoInitClassResult.CORINFO_INITCLASS_DONT_INLINE;
+            }
+
             // TODO: before giving up and asking to generate a helper call, check to see if this is some pattern we can
             //       prove doesn't need initclass anymore because we initialized it earlier.
 
@@ -1408,8 +1451,7 @@ namespace Internal.JitInterface
                     return ObjectToHandle(_compilation.TypeSystemContext.GetWellKnownType(WellKnownType.Object));
 
                 case CorInfoClassId.CLASSID_TYPED_BYREF:
-                    // PREFER: return null: https://github.com/dotnet/corert/issues/2092
-                    return (CORINFO_CLASS_STRUCT_*)FakeTypedReferenceTypeHandle;
+                    throw new TypeSystemException.TypeLoadException("System", "TypedReference", _compilation.TypeSystemContext.SystemModule);
 
                 case CorInfoClassId.CLASSID_TYPE_HANDLE:
                     return ObjectToHandle(_compilation.TypeSystemContext.GetWellKnownType(WellKnownType.RuntimeTypeHandle));
@@ -1421,8 +1463,7 @@ namespace Internal.JitInterface
                     return ObjectToHandle(_compilation.TypeSystemContext.GetWellKnownType(WellKnownType.RuntimeMethodHandle));
 
                 case CorInfoClassId.CLASSID_ARGUMENT_HANDLE:
-                    // TODO: better exception type: invalid input IL
-                    throw new NotSupportedException("Vararg methods not supported in .NET Core");
+                    throw new TypeSystemException.TypeLoadException("System", "RuntimeArgumentHandle", _compilation.TypeSystemContext.SystemModule);
 
                 case CorInfoClassId.CLASSID_STRING:
                     return ObjectToHandle(_compilation.TypeSystemContext.GetWellKnownType(WellKnownType.String));
@@ -1485,7 +1526,11 @@ namespace Internal.JitInterface
         }
 
         private uint getArrayRank(CORINFO_CLASS_STRUCT_* cls)
-        { throw new NotImplementedException("getArrayRank"); }
+        {
+            var td = HandleToObject(cls) as ArrayType;
+            Debug.Assert(td != null);
+            return (uint) td.Rank;
+        }
 
         private void* getArrayInitializationData(CORINFO_FIELD_STRUCT_* field, uint size)
         {
@@ -1745,7 +1790,7 @@ namespace Internal.JitInterface
             *implicitBoundaries = BoundaryTypes.DEFAULT_BOUNDARIES;
         }
 
-        // Create a DebugLocInfo which is a table from native offset to sourece line.
+        // Create a DebugLocInfo which is a table from native offset to source line.
         // using native to il offset (pMap) and il to source line (_sequencePoints).
         private void setBoundaries(CORINFO_METHOD_STRUCT_* ftn, uint cMap, OffsetMapping* pMap)
         {
@@ -1756,28 +1801,47 @@ namespace Internal.JitInterface
                 return;
             }
 
+            int largestILOffset = 0; // All epiloges point to the largest IL offset.
+            for (int i = 0; i < cMap; i++)
+            {
+                OffsetMapping nativeToILInfo = pMap[i];
+                int currectILOffset = (int)nativeToILInfo.ilOffset;
+                if (currectILOffset > largestILOffset) // Special offsets are negative.
+                {
+                    largestILOffset = currectILOffset;
+                }
+            }
+
+            int previousNativeOffset = -1; 
             List<DebugLocInfo> debugLocInfos = new List<DebugLocInfo>();
             for (int i = 0; i < cMap; i++)
             {
+                OffsetMapping nativeToILInfo = pMap[i];
+                int ilOffset = (int)nativeToILInfo.ilOffset;
+                int nativeOffset = (int)pMap[i].nativeOffset;
+                if (nativeOffset == previousNativeOffset)
+                {
+                    // Save the first one, skip others.
+                    continue;
+                }
+                switch (ilOffset)
+                {
+                    case (int)MappingTypes.PROLOG:
+                        ilOffset = 0;
+                        break;
+                    case (int)MappingTypes.EPILOG:
+                        ilOffset = largestILOffset;
+                        break;
+                    case (int)MappingTypes.NO_MAPPING:
+                        continue;
+                }
                 SequencePoint s;
-                if (_sequencePoints.TryGetValue((int)pMap[i].ilOffset, out s))
+                if (_sequencePoints.TryGetValue((int)ilOffset, out s))
                 {
                     Debug.Assert(!string.IsNullOrEmpty(s.Document));
-                    int nativeOffset = (int)pMap[i].nativeOffset;
                     DebugLocInfo loc = new DebugLocInfo(nativeOffset, s.Document, s.LineNumber);
-
-                    // https://github.com/dotnet/corert/issues/270
-                    // We often miss line number at 0 offset, which prevents debugger from
-                    // stepping into callee.
-                    // Synthesize a location info at 0 offset assuming line number is minus one
-                    // from the first entry.
-                    if (debugLocInfos.Count == 0 && nativeOffset != 0)
-                    {
-                        DebugLocInfo firstLoc = new DebugLocInfo(0, loc.FileName, loc.LineNumber - 1, loc.ColNumber);
-                        debugLocInfos.Add(firstLoc);
-                    }
-
                     debugLocInfos.Add(loc);
+                    previousNativeOffset = nativeOffset;
                 }
             }
 
@@ -2237,7 +2301,7 @@ namespace Internal.JitInterface
 
                 if (!runtimeLookup)
                 {
-                    // TODO: LDTOKEN <method>?
+                    throw new NotImplementedException("LDTOKEN Method");
                 }
                 else
                 {
@@ -2528,21 +2592,28 @@ namespace Internal.JitInterface
             }
             else if (directCall)
             {
+                // If this is an intrinsic method with a callsite-specific expansion, this will replace
+                // the method with a method the intrinsic expands into. If it's not the special intrinsic,
+                // method stays unchanged.
+                if (targetMethod.IsIntrinsic)
+                {
+                    var methodIL = (MethodIL)HandleToObject((IntPtr)pResolvedToken.tokenScope);
+                    targetMethod = _compilation.ExpandIntrinsicForCallsite(targetMethod, methodIL.OwningMethod);
+                }
+
                 MethodDesc concreteMethod = targetMethod;
                 targetMethod = targetMethod.GetCanonMethodTarget(CanonicalFormKind.Specific);
-
-                MethodDesc directMethod = targetMethod;
-                if (targetMethod.IsConstructor && targetMethod.OwningType.IsString)
-                {
-                    // Calling a string constructor doesn't call the actual constructor.
-                    directMethod = targetMethod.GetStringInitializer();
-                    concreteMethod = directMethod;
-                }
 
                 pResult.kind = CORINFO_CALL_KIND.CORINFO_CALL;
                 pResult.codePointerOrStubLookup.constLookup.accessType = InfoAccessType.IAT_VALUE;
 
-                if (pResult.exactContextNeedsRuntimeLookup)
+                if (targetMethod.IsConstructor && targetMethod.OwningType.IsString)
+                {
+                    // Calling a string constructor doesn't call the actual constructor.
+                    pResult.codePointerOrStubLookup.constLookup.addr = (void*)ObjectToHandle(
+                        _compilation.NodeFactory.StringAllocator(targetMethod));
+                }
+                else if (pResult.exactContextNeedsRuntimeLookup)
                 {
                     // Nothing to do... The generic handle lookup gets embedded in to the codegen
                     // during the jitting of the call.
@@ -2555,7 +2626,7 @@ namespace Internal.JitInterface
                     // to abort the inlining attempt if the inlinee does any generic lookups.
                     bool inlining = contextMethod != MethodBeingCompiled;
 
-                    if (directMethod.IsSharedByGenericInstantiations && !inlining)
+                    if (targetMethod.IsSharedByGenericInstantiations && !inlining)
                     {
                         MethodDesc runtimeDeterminedMethod = (MethodDesc)GetRuntimeDeterminedObjectForToken(ref pResolvedToken);
                         pResult.codePointerOrStubLookup.constLookup.addr = (void*)ObjectToHandle(
@@ -2564,7 +2635,7 @@ namespace Internal.JitInterface
                     else
                     {
                         pResult.codePointerOrStubLookup.constLookup.addr = (void*)ObjectToHandle(
-                            _compilation.NodeFactory.MethodEntrypoint(directMethod));
+                            _compilation.NodeFactory.MethodEntrypoint(targetMethod));
                     }
                 }
                 else
@@ -2597,11 +2668,20 @@ namespace Internal.JitInterface
                     else
                     {
                         pResult.codePointerOrStubLookup.constLookup.addr = (void*)ObjectToHandle(
-                            _compilation.NodeFactory.MethodEntrypoint(directMethod));
+                            _compilation.NodeFactory.MethodEntrypoint(targetMethod));
                     }
                 }
 
                 pResult.nullInstanceCheck = resolvedCallVirt;
+            }
+            else if (method.HasInstantiation)
+            {
+                // GVM Call Support
+                pResult.kind = CORINFO_CALL_KIND.CORINFO_CALL_CODE_POINTER;
+                pResult.codePointerOrStubLookup.constLookup.accessType = InfoAccessType.IAT_VALUE;
+                pResult.codePointerOrStubLookup.constLookup.addr =
+                    (void*)ObjectToHandle(_compilation.NodeFactory.ReadyToRunHelper(ReadyToRunHelperId.ResolveGenericVirtualMethod, targetMethod));
+                pResult.nullInstanceCheck = false;
             }
             else if ((flags & CORINFO_CALLINFO_FLAGS.CORINFO_CALLINFO_LDFTN) != 0)
             {
@@ -2923,6 +3003,9 @@ namespace Internal.JitInterface
 
         private void recordRelocation(void* location, void* target, ushort fRelocType, ushort slotNum, int addlDelta)
         {
+            // slotNum is not unused
+            Debug.Assert(slotNum == 0);
+
             int relocOffset;
             BlockType locationBlock = findKnownBlock(location, out relocOffset);
             Debug.Assert(locationBlock != BlockType.Unknown, "BlockType.Unknown not expected");
@@ -2965,9 +3048,12 @@ namespace Internal.JitInterface
 
             relocDelta += addlDelta;
 
+            // relocDelta is stored as the value
+            Relocation.WriteValue((RelocType)fRelocType, location, relocDelta);
+
             if (_relocs.Count == 0)
                 _relocs.EnsureCapacity(_code.Length / 32 + 1);
-            _relocs.Add(new Relocation((RelocType)fRelocType, relocOffset, relocTarget, relocDelta));
+            _relocs.Add(new Relocation((RelocType)fRelocType, relocOffset, relocTarget));
         }
 
         private ushort getRelocTypeHint(void* target)
@@ -2988,17 +3074,18 @@ namespace Internal.JitInterface
 
         private uint getJitFlags(ref CORJIT_FLAGS flags, uint sizeInBytes)
         {
-            flags.corJitFlags = 
-                CorJitFlag.CORJIT_FLG_SKIP_VERIFICATION |
-                CorJitFlag.CORJIT_FLG_READYTORUN |
-                CorJitFlag.CORJIT_FLG_RELOC |
-                CorJitFlag.CORJIT_FLG_DEBUG_INFO |
-                CorJitFlag.CORJIT_FLG_PREJIT;
-
-            flags.corJitFlags2 = CorJitFlag2.CORJIT_FLG2_USE_PINVOKE_HELPERS;
+            flags.Set(CorJitFlag.CORJIT_FLAG_SKIP_VERIFICATION);
+            flags.Set(CorJitFlag.CORJIT_FLAG_READYTORUN);
+            flags.Set(CorJitFlag.CORJIT_FLAG_RELOC);
+            flags.Set(CorJitFlag.CORJIT_FLAG_DEBUG_INFO);
+            flags.Set(CorJitFlag.CORJIT_FLAG_PREJIT);
+            flags.Set(CorJitFlag.CORJIT_FLAG_USE_PINVOKE_HELPERS);
 
             if (this.MethodBeingCompiled.IsNativeCallable)
-                flags.corJitFlags2 |= CorJitFlag2.CORJIT_FLG2_REVERSE_PINVOKE;
+                flags.Set(CorJitFlag.CORJIT_FLAG_REVERSE_PINVOKE);
+
+            if (this.MethodBeingCompiled.IsPInvoke)
+                flags.Set(CorJitFlag.CORJIT_FLAG_IL_STUB);
 
             return (uint)sizeof(CORJIT_FLAGS);
         }

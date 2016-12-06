@@ -265,19 +265,57 @@ namespace System.Globalization
             return null;
         }
 
-        private static string GetLanguageDisplayName(string cultureName)
+        private string GetLanguageDisplayName(string cultureName)
         {
+#if ENABLE_WINRT
             return WinRTInterop.Callbacks.GetLanguageDisplayName(cultureName);
+#else
+            // Usually the UI culture shouldn't be different than what we got from WinRT except
+            // if DefaultThreadCurrentUICulture was set
+            CultureInfo ci;
+
+            if (CultureInfo.DefaultThreadCurrentUICulture != null &&
+                ((ci = GetUserDefaultCulture()) != null) &&
+                !CultureInfo.DefaultThreadCurrentUICulture.Name.Equals(ci.Name))
+            {
+                return SNATIVEDISPLAYNAME;
+            }
+            else
+            {
+                return GetLocaleInfo(cultureName, LocaleStringData.LocalizedDisplayName);
+            }
+#endif // ENABLE_WINRT
         }
 
-        private static string GetRegionDisplayName(string isoCountryCode)
+        private string GetRegionDisplayName(string isoCountryCode)
         {
+#if ENABLE_WINRT
             return WinRTInterop.Callbacks.GetRegionDisplayName(isoCountryCode);
+#else
+            // Usually the UI culture shouldn't be different than what we got from WinRT except
+            // if DefaultThreadCurrentUICulture was set
+            CultureInfo ci;
+
+            if (CultureInfo.DefaultThreadCurrentUICulture != null &&
+                ((ci = GetUserDefaultCulture()) != null) &&
+                !CultureInfo.DefaultThreadCurrentUICulture.Name.Equals(ci.Name))
+            {
+                return SNATIVECOUNTRY;
+            }
+            else
+            {
+                return GetLocaleInfo(LocaleStringData.LocalizedCountryName);
+            }
+#endif // ENABLE_WINRT
         }
 
         private static CultureInfo GetUserDefaultCulture()
         {
+#if ENABLE_WINRT
             return (CultureInfo)WinRTInterop.Callbacks.GetUserDefaultCulture();
+#else
+            return CultureInfo.GetUserDefaultCulture();
+#endif // ENABLE_WINRT
         }
 
         // PAL methods end here.
@@ -558,5 +596,76 @@ namespace System.Globalization
 
             return null;
         }
+
+        private int LocaleNameToLCID(string cultureName)
+        {
+            return GetLocaleInfo(LocaleNumberData.LanguageId);
+        }
+        
+        private static string LCIDToLocaleName(int culture)
+        {
+            throw new NotImplementedException();
+        }
+
+        private int GetAnsiCodePage(string cultureName)
+        {
+            return GetLocaleInfo(LocaleNumberData.AnsiCodePage);
+        }
+
+        private int GetOemCodePage(string cultureName)
+        {
+            return GetLocaleInfo(LocaleNumberData.OemCodePage);
+        }
+
+        private int GetMacCodePage(string cultureName)
+        {
+            return GetLocaleInfo(LocaleNumberData.MacCodePage);
+        }
+
+        private int GetEbcdicCodePage(string cultureName)
+        {
+            return GetLocaleInfo(LocaleNumberData.EbcdicCodePage);
+        }
+
+        private int GetGeoId(string cultureName)
+        {
+            return GetLocaleInfo(LocaleNumberData.GeoId);
+        }
+
+        private int GetDigitSubstitution(string cultureName)
+        {
+            return GetLocaleInfo(LocaleNumberData.DigitSubstitution);
+        }
+
+        private string GetThreeLetterWindowsLanguageName(string cultureName)
+        {
+            return GetLocaleInfo(cultureName, LocaleStringData.AbbreviatedWindowsLanguageName);
+        }
+
+        private static CultureInfo[] EnumCultures(CultureTypes types)
+        {
+            throw new NotImplementedException();
+        }
+
+        private string GetConsoleFallbackName(string cultureName)
+        {
+            return GetLocaleInfo(cultureName, LocaleStringData.ConsoleFallbackName);
+        }
+
+        internal bool IsFramework
+        {
+            get { throw new NotImplementedException(); }
+        }
+
+        internal bool IsWin32Installed
+        {
+            get { throw new NotImplementedException(); }
+        }
+        
+        internal bool IsReplacementCulture
+        {
+            get { throw new NotImplementedException(); }
+        }
+        
     }
 }

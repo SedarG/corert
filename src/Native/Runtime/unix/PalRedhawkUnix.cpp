@@ -127,6 +127,8 @@ typedef void* PEXCEPTION_RECORD;
 
 #define PAGE_NOACCESS           0x01
 #define PAGE_READWRITE          0x04
+#define PAGE_EXECUTE_READ       0x20
+#define PAGE_EXECUTE_READWRITE  0x40
 #define MEM_COMMIT              0x1000
 #define MEM_RESERVE             0x2000
 #define MEM_DECOMMIT            0x4000
@@ -441,12 +443,12 @@ REDHAWK_PALEXPORT bool REDHAWK_PALAPI PalInit()
     {
         return false;
     }
-
+#ifndef USE_PORTABLE_HELPERS
     if (!InitializeHardwareExceptionHandling())
     {
         return false;
     }
-
+#endif // !USE_PORTABLE_HELPERS
     int status = pthread_key_create(&g_threadKey, TlsObjectDestructor);
     if (status != 0)
     {
@@ -857,6 +859,12 @@ static int W32toUnixAccessControl(uint32_t flProtect)
     case PAGE_READWRITE:
         prot = PROT_READ | PROT_WRITE;
         break;
+    case PAGE_EXECUTE_READ:
+        prot = PROT_READ | PROT_EXEC;
+        break;
+    case PAGE_EXECUTE_READWRITE:
+        prot = PROT_READ | PROT_WRITE | PROT_EXEC;
+        break;
     default:
         ASSERT(false);
         break;
@@ -929,6 +937,13 @@ REDHAWK_PALEXPORT UInt32_BOOL REDHAWK_PALAPI PalVirtualFree(_In_ void* pAddress,
 
     // UNIXTODO: Implement this function
     return UInt32_TRUE;
+}
+
+REDHAWK_PALEXPORT UInt32_BOOL REDHAWK_PALAPI PalVirtualProtect(_In_ void* pAddress, size_t size, uint32_t protect)
+{
+    int unixProtect = W32toUnixAccessControl(protect);
+
+    return mprotect(pAddress, size, unixProtect) == 0;
 }
 
 REDHAWK_PALEXPORT _Ret_maybenull_ void* REDHAWK_PALAPI PalSetWerDataBuffer(_In_ void* pNewBuffer)
@@ -1014,11 +1029,6 @@ extern "C" void TerminateProcess(HANDLE arg1, UInt32 arg2)
     // Then if we modified the signature of the DuplicateHandle too, we can
     // get rid of the PalGetCurrentProcess.
     PORTABILITY_ASSERT("UNIXTODO: Implement this function");
-}
-
-extern "C" void ExitProcess(UInt32 exitCode)
-{
-    exit(exitCode);
 }
 
 extern "C" UInt32_BOOL SetEvent(HANDLE event)

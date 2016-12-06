@@ -7,15 +7,13 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using ILCompiler.Compiler.CppCodeGen;
+using ILCompiler.DependencyAnalysis;
 using ILCompiler.DependencyAnalysisFramework;
 
+using Internal.IL;
+using Internal.Text;
 using Internal.TypeSystem;
 using Internal.TypeSystem.Ecma;
-
-using Internal.Runtime;
-
-using Internal.IL;
-using ILCompiler.DependencyAnalysis;
 
 namespace ILCompiler.CppCodeGen
 {
@@ -256,7 +254,7 @@ namespace ILCompiler.CppCodeGen
                 case TypeFlags.Pointer:
                     return GetCppSignatureTypeName(((ParameterizedType)type).ParameterType) + "*";
                 default:
-                    return _compilation.NameMangler.GetMangledTypeName(type);
+                    return _compilation.NameMangler.GetMangledTypeName(type).ToString();
             }
         }
 
@@ -281,12 +279,12 @@ namespace ILCompiler.CppCodeGen
 
         public string GetCppMethodName(MethodDesc method)
         {
-            return _compilation.NameMangler.GetMangledMethodName(method);
+            return _compilation.NameMangler.GetMangledMethodName(method).ToString();
         }
 
         public string GetCppFieldName(FieldDesc field)
         {
-            return _compilation.NameMangler.GetMangledFieldName(field);
+            return _compilation.NameMangler.GetMangledFieldName(field).ToString();
         }
 
         public string GetCppStaticFieldName(FieldDesc field)
@@ -757,7 +755,7 @@ namespace ILCompiler.CppCodeGen
             }
             else
             {
-                string mangledName = ((ISymbolNode)node).MangledName;
+                string mangledName = ((ISymbolNode)node).GetMangledName();
 
                 // Rename generic composition and optional fields nodes to avoid name clash with types
                 bool shouldReplaceNamespaceQualifier = node is GenericCompositionNode || node is EETypeOptionalFieldsNode;
@@ -836,11 +834,13 @@ namespace ILCompiler.CppCodeGen
             // Node is either an non-emitted type or a generic composition - both are ignored for CPP codegen
             else if ((reloc.Target is TypeManagerIndirectionNode || reloc.Target is InterfaceDispatchMapNode || reloc.Target is EETypeOptionalFieldsNode || reloc.Target is GenericCompositionNode) && !(reloc.Target as ObjectNode).ShouldSkipEmittingObjectNode(factory))
             {
+                string mangledTargetName = reloc.Target.GetMangledName();
                 bool shouldReplaceNamespaceQualifier = reloc.Target is GenericCompositionNode || reloc.Target is EETypeOptionalFieldsNode;
-                relocCode.Append(shouldReplaceNamespaceQualifier ? reloc.Target.MangledName.Replace("::", "_") : reloc.Target.MangledName);
+                relocCode.Append(shouldReplaceNamespaceQualifier ? mangledTargetName.Replace("::", "_") : mangledTargetName);
                 relocCode.Append("()");
             }
-            else if (reloc.Target is ObjectAndOffsetSymbolNode && (reloc.Target as ISymbolNode).MangledName.Contains("DispatchMap"))
+            else if (reloc.Target is ObjectAndOffsetSymbolNode &&
+                (reloc.Target as ObjectAndOffsetSymbolNode).Target is ArrayOfEmbeddedPointersNode<InterfaceDispatchMapNode>)
             {
                 relocCode.Append("dispatchMapModule");
             }
@@ -964,7 +964,7 @@ namespace ILCompiler.CppCodeGen
                 else if (node is InterfaceDispatchMapNode)
                 {
                     dispatchPointers.Append("(void *)");
-                    dispatchPointers.Append(((ISymbolNode)node).MangledName);
+                    dispatchPointers.Append(((ISymbolNode)node).GetMangledName());
                     dispatchPointers.Append("(),");
                     dispatchPointers.AppendLine();
                     dispatchMapCount++;
@@ -1183,7 +1183,7 @@ namespace ILCompiler.CppCodeGen
             rtrHeader.Append("{ 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00 },");
             rtrHeader.AppendLine();
             rtrHeader.Append("(void*)");
-            rtrHeader.Append(((ISymbolNode)headerNode).MangledName);
+            rtrHeader.Append(headerNode.GetMangledName());
             rtrHeader.Append("(),");
             rtrHeader.AppendLine();
             rtrHeader.Append("{ 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00 }");
@@ -1217,57 +1217,7 @@ namespace ILCompiler.CppCodeGen
             Out.Write(sb.ToString());
         }
 
-        private void OutputMainMethodStub(MethodDesc entrypoint)
-        {
-            var sb = new CppGenerationBuffer();
-
-            sb.AppendLine();
-            if (_compilation.TypeSystemContext.Target.OperatingSystem == TargetOS.Windows)
-            {
-                sb.Append("int wmain(int argc, wchar_t * argv[]) { ");
-            }
-            else
-            {
-                sb.Append("int main(int argc, char * argv[]) {");
-            }
-            sb.Indent();
-
-            sb.AppendLine();
-            sb.Append("if (__initialize_runtime() != 0)");
-            sb.Indent();
-            sb.AppendLine();
-            sb.Append("return -1;");
-            sb.Exdent();
-            sb.AppendEmptyLine();
-            sb.AppendLine();
-            sb.Append("ReversePInvokeFrame frame;");
-            sb.AppendLine();
-            sb.Append("__reverse_pinvoke(&frame);");
-
-            sb.AppendEmptyLine();
-            sb.AppendLine();
-            sb.Append("::System_Private_CoreLib::Internal::Runtime::CompilerHelpers::StartupCodeHelpers::InitializeModules((intptr_t)RtRHeaderWrapper(), 2);");
-            sb.AppendLine();
-            sb.Append("int ret = ");
-            sb.Append(GetCppMethodDeclarationName(entrypoint.OwningType, GetCppMethodName(entrypoint)));
-            sb.Append("(argc, (intptr_t)argv);");
-
-            sb.AppendEmptyLine();
-            sb.AppendLine();
-            sb.Append("__reverse_pinvoke_return(&frame);");
-            sb.AppendLine();
-            sb.Append("__shutdown_runtime();");
-
-            sb.AppendLine();
-            sb.Append("return ret;");
-            sb.Exdent();
-            sb.AppendLine();
-            sb.Append("}");
-
-            Out.Write(sb.ToString());
-        }
-
-        public void OutputCode(IEnumerable<DependencyNode> nodes, MethodDesc entrypoint, NodeFactory factory)
+        public void OutputCode(IEnumerable<DependencyNode> nodes, NodeFactory factory)
         {
             BuildMethodLists(nodes);
 
@@ -1304,11 +1254,6 @@ namespace ILCompiler.CppCodeGen
             {
                 if (node is CppMethodCodeNode)
                     OutputMethodNode(node as CppMethodCodeNode);
-            }
-
-            if (entrypoint != null)
-            {
-                OutputMainMethodStub(entrypoint);
             }
 
             Out.Dispose();

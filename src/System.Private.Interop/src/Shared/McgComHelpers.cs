@@ -124,12 +124,13 @@ namespace System.Runtime.InteropServices
         /// </summary>
         internal static void SafeReleaseStream(IntPtr pStream)
         {
-            Debug.Assert(pStream != default(IntPtr));
 #if ENABLE_WINRT
-            // Release marshalled data and ignore any error
-            ExternalInterop.CoReleaseMarshalData(pStream);
-
-            McgMarshal.ComRelease(pStream);
+            if (pStream != default(IntPtr))
+            {
+                // Release marshalled data and ignore any error
+                ExternalInterop.CoReleaseMarshalData(pStream);
+                McgMarshal.ComRelease(pStream);
+            }
 #else
             throw new PlatformNotSupportedException("SafeReleaseStream");
 #endif
@@ -619,7 +620,7 @@ namespace System.Runtime.InteropServices
         internal static __ComGenericInterfaceDispatcher CreateGenericComDispatcher(RuntimeTypeHandle genericDispatcherDef, RuntimeTypeHandle[] genericArguments, __ComObject comThisPointer)
         {
 #if !RHTESTCL && !CORECLR && !CORERT
-            Debug.Assert(Internal.Runtime.Augments.RuntimeAugments.IsGenericTypeDefinition(genericDispatcherDef));
+            Debug.Assert(genericDispatcherDef.IsGenericTypeDefinition());
             Debug.Assert(genericArguments != null && genericArguments.Length > 0);
 
             RuntimeTypeHandle instantiatedDispatcherType;

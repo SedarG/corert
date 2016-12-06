@@ -3,6 +3,8 @@
 // See the LICENSE file in the project root for more information.
 
 using System.Collections.Generic;
+
+using ILCompiler.DependencyAnalysis;
 using Internal.TypeSystem;
 using Internal.TypeSystem.Ecma;
 
@@ -12,14 +14,13 @@ namespace ILCompiler
     {
         private HashSet<EcmaModule> _compilationModuleSet;
 
-        public MultiFileCompilationModuleGroup(CompilerTypeSystemContext typeSystemContext) : base(typeSystemContext)
-        { }
+        public MultiFileCompilationModuleGroup(IEnumerable<EcmaModule> compilationModuleSet)
+        {
+            _compilationModuleSet = new HashSet<EcmaModule>(compilationModuleSet);
+        }
 
         public override bool ContainsType(TypeDesc type)
         {
-            if (type.ContainsGenericVariables)
-                return true;
-
             EcmaType ecmaType = type as EcmaType;
 
             if (ecmaType == null)
@@ -35,7 +36,7 @@ namespace ILCompiler
 
         public override bool ContainsMethod(MethodDesc method)
         {
-            if (method.GetTypicalMethodDefinition().ContainsGenericVariables)
+            if (method.HasInstantiation)
                 return true;
 
             return ContainsType(method.OwningType);
@@ -45,7 +46,7 @@ namespace ILCompiler
         {
             get
             {
-                foreach (var module in InputModules)
+                foreach (var module in _compilationModuleSet)
                 {
                     if (module.PEReader.PEHeaders.IsExe)
                     {
@@ -56,35 +57,9 @@ namespace ILCompiler
             }
         }
 
-        public override void AddCompilationRoots(IRootingServiceProvider rootProvider)
-        {
-            base.AddCompilationRoots(rootProvider);
-
-            if (BuildingLibrary)
-            {
-                foreach (var module in InputModules)
-                {
-                    AddCompilationRootsForMultifileLibrary(module, rootProvider);
-                }
-            }
-        }
-
-        private void AddCompilationRootsForMultifileLibrary(EcmaModule module, IRootingServiceProvider rootProvider)
-        {
-            foreach (TypeDesc type in module.GetAllTypes())
-            {
-                // Skip delegates (since their Invoke methods have no IL) and uninstantiated generic types
-                if (type.IsDelegate || type.ContainsGenericVariables)
-                    continue;
-
-                rootProvider.AddCompilationRoot(type, "Library module type");
-                RootMethods(type, "Library module method", rootProvider);
-            }
-        }
-
         private bool IsModuleInCompilationGroup(EcmaModule module)
         {
-            return InputModules.Contains(module);
+            return _compilationModuleSet.Contains(module);
         }
 
         public override bool IsSingleFileCompilation
@@ -107,7 +82,7 @@ namespace ILCompiler
                 return true;
 
             // Fully build all shareable types so they will be identical in each module
-            if (ShouldShareAcrossModules(type))
+            if (EETypeNode.IsTypeNodeShareable(type))
                 return true;
 
             // If referring to a type from another module, VTables, interface maps, etc should assume the
@@ -118,68 +93,9 @@ namespace ILCompiler
             return false;
         }
 
-        public override bool ShouldShareAcrossModules(MethodDesc method)
-        {
-            if (method is InstantiatedMethod)
-                return true;
-
-            return ShouldShareAcrossModules(method.OwningType);
-        }
-
-        public override bool ShouldShareAcrossModules(TypeDesc type)
-        {
-            if (type.IsParameterizedType || type.IsFunctionPointer || type is InstantiatedType)
-            {
-                return true;
-            }
-
-            return false;
-        }
-
-        private void RootMethods(TypeDesc type, string reason, IRootingServiceProvider rootProvider)
-        {
-            foreach (MethodDesc method in type.GetMethods())
-            {
-                // Skip methods with no IL and uninstantiated generic methods
-                if (method.IsIntrinsic || method.IsAbstract || method.ContainsGenericVariables)
-                    continue;
-
-                if (method.IsInternalCall)
-                    continue;
-
-                rootProvider.AddCompilationRoot(method, reason);
-            }
-        }
-
         public override bool ShouldReferenceThroughImportTable(TypeDesc type)
         {
             return false;
-        }
-
-        private HashSet<EcmaModule> InputModules
-        {
-            get
-            {
-                if (_compilationModuleSet == null)
-                {
-                    HashSet<EcmaModule> newCompilationModuleSet = new HashSet<EcmaModule>();
-
-                    foreach (var path in _typeSystemContext.InputFilePaths)
-                    {
-                        newCompilationModuleSet.Add(_typeSystemContext.GetModuleFromPath(path.Value));
-                    }
-
-                    lock (this)
-                    {
-                        if (_compilationModuleSet == null)
-                        {
-                            _compilationModuleSet = newCompilationModuleSet;
-                        }
-                    }
-                }
-
-                return _compilationModuleSet;
-            }
         }
     }
 }

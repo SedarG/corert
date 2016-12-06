@@ -2,12 +2,12 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
-using Internal.TypeSystem;
-using Internal.IL;
-using Internal.IL.Stubs;
 using System;
 
-using ILCompiler;
+using Internal.TypeSystem;
+
+using AssemblyName = System.Reflection.AssemblyName;
+using Debug = System.Diagnostics.Debug;
 
 namespace Internal.IL.Stubs.StartupCode
 {
@@ -17,14 +17,12 @@ namespace Internal.IL.Stubs.StartupCode
     /// </summary>
     public sealed class StartupCodeMainMethod : ILStubMethod
     {
-        private CompilerTypeSystemContext _typeSystemContext;
         private TypeDesc _owningType;
         private MethodDesc _mainMethod;
         private MethodSignature _signature;
 
-        public StartupCodeMainMethod(CompilerTypeSystemContext typeSystemContext, TypeDesc owningType, MethodDesc mainMethod)
+        public StartupCodeMainMethod(TypeDesc owningType, MethodDesc mainMethod)
         {
-            _typeSystemContext = typeSystemContext;
             _owningType = owningType;
             _mainMethod = mainMethod;
         }
@@ -33,7 +31,7 @@ namespace Internal.IL.Stubs.StartupCode
         {
             get
             {
-                return _typeSystemContext;
+                return _owningType.Context;
             }
         }
 
@@ -58,7 +56,7 @@ namespace Internal.IL.Stubs.StartupCode
             ILEmitter emitter = new ILEmitter();
             ILCodeStream codeStream = emitter.NewCodeStream();
 
-            ModuleDesc developerExperience = _typeSystemContext.GetModuleForSimpleName("System.Private.DeveloperExperience.Console", false);
+            ModuleDesc developerExperience = Context.ResolveAssembly(new AssemblyName("System.Private.DeveloperExperience.Console"), false);
             if (developerExperience != null)
             {
                 TypeDesc connectorType = developerExperience.GetKnownType("Internal.DeveloperExperience", "DeveloperExperienceConnectorConsole");
@@ -90,9 +88,32 @@ namespace Internal.IL.Stubs.StartupCode
                 codeStream.Emit(ILOpcode.call, emitter.NewToken(startup.GetKnownMethod("GetMainMethodArguments", null)));
             }
             codeStream.Emit(ILOpcode.call, emitter.NewToken(_mainMethod));
-            if (_mainMethod.Signature.ReturnType.IsVoid)
+
+            MethodDesc setLatchedExitCode = startup.GetMethod("SetLatchedExitCode", null);
+            MethodDesc shutdown = startup.GetMethod("Shutdown", null);
+
+            // The class library either supports "advanced shutdown", or doesn't. No half-implementations allowed.
+            Debug.Assert((setLatchedExitCode != null) == (shutdown != null));
+
+            if (setLatchedExitCode != null)
             {
-                codeStream.EmitLdc(0);
+                // If the main method has a return value, save it
+                if (!_mainMethod.Signature.ReturnType.IsVoid)
+                {
+                    codeStream.Emit(ILOpcode.call, emitter.NewToken(setLatchedExitCode));
+                }
+
+                // Ask the class library to shut down and return exit code.
+                codeStream.Emit(ILOpcode.call, emitter.NewToken(shutdown));
+            }
+            else
+            {
+                // This is a class library that doesn't have SetLatchedExitCode/Shutdown.
+                // If the main method returns void, we simply use 0 exit code.
+                if (_mainMethod.Signature.ReturnType.IsVoid)
+                {
+                    codeStream.EmitLdc(0);
+                }
             }
 
             codeStream.Emit(ILOpcode.ret);

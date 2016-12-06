@@ -3,6 +3,7 @@
 // See the LICENSE file in the project root for more information.
 
 using System.Diagnostics;
+using System.Diagnostics.Contracts;
 
 namespace System.Globalization
 {
@@ -389,6 +390,31 @@ namespace System.Globalization
             StartsWith,
             End,
             EndsWith,
+        }
+
+        private unsafe SortKey CreateSortKey(String source, CompareOptions options)
+        {
+            if (source==null) { throw new ArgumentNullException(nameof(source)); }
+            Contract.EndContractBlock();
+
+            if ((options & ValidSortkeyCtorMaskOffFlags) != 0)
+            {
+                throw new ArgumentException(SR.Argument_InvalidFlag, nameof(options));
+            }
+
+            throw new NotImplementedException();
+        }
+
+        private unsafe static bool IsSortable(char *text, int length)
+        {
+            // CompareInfo c = CultureInfo.InvariantCulture.CompareInfo;
+            // return (InternalIsSortable(c.m_dataHandle, c.m_handleOrigin, c.m_sortName, text, text.Length));
+            throw new NotImplementedException();
+        }
+
+        private SortVersion GetSortVersion()
+        {
+            throw new NotImplementedException();
         }
     }
 }
