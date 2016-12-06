@@ -9,7 +9,6 @@
     <PackageTargetFramework>netcoreapp1.2</PackageTargetFramework>
     <!-- Override this property so that the package name won't look like runtime.[RID].[TFM].[ID] -->
     <PackageTargetRuntime></PackageTargetRuntime>
-    <PreventImplementationReference>true</PreventImplementationReference>
   </PropertyGroup>
   <ItemGroup>
     <!-- PackageTargetRuntime needs to be reset because if let unset, it's going to be set to globally configured value 
